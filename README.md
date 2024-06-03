@@ -1,5 +1,5 @@
 # Sign Language Translator Using Computer Vision and Machine Learning
-
+TO run the code first run the model.py file then the camerahands.py file
 #### Overview
 The provided code snippet is part of a real-time sign language translation system that uses a webcam to capture live video of hand gestures, which are then processed and interpreted as letters of the alphabet. This application utilizes OpenCV for video processing, MediaPipe for hand tracking, and TensorFlow with a pre-trained deep learning model to classify hand gestures into corresponding sign language letters.
 
