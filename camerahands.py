@@ -1,81 +1,74 @@
-import os
 import cv2
-import mediapipe as mp
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-import time
+import mediapipe as mp
 
-# Set TensorFlow log level
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# Load the trained model
+model = load_model('sign_language_model.h5')
 
-# Load the pre-trained model
-model = load_model('smnist.h5')
+# Define class labels
+class_labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y']
 
-# Setup MediaPipe Hands
-mphands = mp.solutions.hands
-hands = mphands.Hands()
+# Initialize MediaPipe Hands
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.7)
 mp_drawing = mp.solutions.drawing_utils
 
 # Initialize webcam
 cap = cv2.VideoCapture(0)
-ret, frame = cap.read()
-if not ret:
-    print("Failed to grab frame")
-    cap.release()
-    raise SystemExit("Failed to grab initial frame from the camera. Exiting...")
-
-# Get the dimensions of the frame
-h, w, _ = frame.shape
-
-# Define letters corresponding to model's classes
-letterpred = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y']
 
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
-        print("Failed to grab frame")
+        print("Failed to capture frame. Exiting...")
         break
 
-    framergb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    result = hands.process(framergb)
-    hand_landmarks = result.multi_hand_landmarks
+    # Flip the frame horizontally for a mirror effect
+    frame = cv2.flip(frame, 1)
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    if hand_landmarks:
-        for handLMs in hand_landmarks:
-            x_min, x_max, y_min, y_max = w, 0, h, 0
-            for lm in handLMs.landmark:
-                x, y = int(lm.x * w), int(lm.y * h)
-                x_min, x_max = min(x_min, x), max(x_max, x)
-                y_min, y_max = min(y_min, y), max(y_max, y)
-            y_min, y_max = max(y_min - 20, 0), min(y_max + 20, h)
-            x_min, x_max = max(x_min - 20, 0), min(x_max + 20, w)
+    # Process the frame for hand landmarks
+    results = hands.process(rgb_frame)
 
-            # Extract ROI and preprocess it for the model
-            roi = frame[y_min:y_max, x_min:x_max]
-            roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            roi_resized = cv2.resize(roi_gray, (28, 28))
-            roi_normalized = roi_resized / 255.0
-            roi_expanded = np.expand_dims(roi_normalized, axis=[0, -1])  # Shape: (1, 28, 28, 1)
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            # Draw landmarks on the frame
+            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-            # Predict using the pre-trained model
-            predictions = model.predict(roi_expanded)
-            predicted_index = np.argmax(predictions)
-            predicted_letter = letterpred[predicted_index]
-            confidence = predictions[0][predicted_index]
+            # Get bounding box for the hand
+            h, w, _ = frame.shape
+            x_min = int(min([lm.x for lm in hand_landmarks.landmark]) * w)
+            y_min = int(min([lm.y for lm in hand_landmarks.landmark]) * h)
+            x_max = int(max([lm.x for lm in hand_landmarks.landmark]) * w)
+            y_max = int(max([lm.y for lm in hand_landmarks.landmark]) * h)
 
-            # Display predicted letter and confidence on the frame
-            cv2.putText(frame, f'{predicted_letter} - {confidence*100:.2f}%', (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            # Extract the region of interest (ROI)
+            hand_roi = frame[y_min:y_max, x_min:x_max]
+            if hand_roi.size > 0:
+                # Preprocess the ROI
+                gray_roi = cv2.cvtColor(hand_roi, cv2.COLOR_BGR2GRAY)
+                resized_roi = cv2.resize(gray_roi, (28, 28))
+                normalized_roi = resized_roi / 255.0
+                reshaped_roi = np.expand_dims(normalized_roi, axis=(0, -1))  # Shape: (1, 28, 28, 1)
 
-            # Draw rectangle around the hand
-            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+                # Predict
+                predictions = model.predict(reshaped_roi)
+                predicted_index = np.argmax(predictions)
+                predicted_label = class_labels[predicted_index]
+                confidence = predictions[0][predicted_index] * 100
 
-    # Display the resulting frame
-    cv2.imshow('Frame', frame)
+                # Display results on the frame
+                cv2.putText(frame, f'{predicted_label} ({confidence:.2f}%)', (x_min, y_min - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
-    if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+    # Show the output frame
+    cv2.imshow('Sign Language Detection', frame)
+
+    # Exit on pressing 'ESC'
+    if cv2.waitKey(1) & 0xFF == 27:
         break
 
-# Release the capture and destroy any OpenCV windows
+# Release resources
 cap.release()
 cv2.destroyAllWindows()
